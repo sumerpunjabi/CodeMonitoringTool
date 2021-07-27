@@ -171,9 +171,6 @@ Used a Buffered channel instead of passing through a normal channel because we
 don't have to create a slice or struct to pass the values between functions and maps
 are unreliable when used with goroutines
 
-*/
-
-/*
 Questions:
 
 1. Are these small efficiency's worth it in a small program?
