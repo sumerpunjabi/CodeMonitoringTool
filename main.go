@@ -2,8 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/gammazero/workerpool"
+	"github.com/carwale/golibraries/workerpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"io/ioutil"
@@ -12,6 +13,9 @@ import (
 	"time"
 )
 
+type repoData struct {
+	name string
+}
 
 // getRepos returns an array of repository names on codacy
 func getRepos() []string{
@@ -62,7 +66,7 @@ func getRepos() []string{
 	return repoList
 }
 
-// issues returns a buffered integer channel with issues of the respective repo
+// getIssues returns a map with issues of the respective repo
 func getIssues(repoName string) map[string]int {
 
 	// struct to receive and breakdown repository issue json data
@@ -87,19 +91,19 @@ func getIssues(repoName string) map[string]int {
 	client := &http.Client{Timeout: 10 * time.Second}	// http client times out to prevent getting stuck while making request
 	resp, err := client.Do(req)
 	if err != nil{
-		log.Fatalln(err)
+		log.Println(err)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil{
-		log.Fatalln(err)
+		log.Println(err)
 	}
 
 	res := &Results{}
 	err = json.Unmarshal(body, res)	// translates json response body into struct
 	if err != nil{
-		log.Fatalln(err)
+		log.Println(err)
 	}
 
 	issuesMap := make(map[string]int)
@@ -130,31 +134,34 @@ func pushIssues(repoName string, issuesMap map[string]int) {
 			Grouping("Categories", i).
 			Grouping("Repository", repoName).
 			Push(); err != nil {
-			fmt.Printf("Could not push %s, %s to Pushgateway:", i, repoName)
-			fmt.Println(err)
+			log.Printf("Could not push %s, %s to Pushgateway:", i, repoName)
 		}
 
 	}
 
 }
 
+// Process implements IJob by combining getIssues and pushIssues
+func (r *repoData) Process() error{
+	issuesMap := getIssues(r.name)
+
+	pushIssues(r.name, issuesMap)
+
+	return errors.New("failed to update issues")
+}
 
 func main() {
 
-	repos := getRepos()
+	repoList := getRepos()
 
-	wg := workerpool.New(10)
+	dispatcher := workerpool.NewDispatcher("CodacyTool")
 
-	// adds one worker to the pool per repository
-	for _ , repoName := range repos{
+	for _ , repoName := range repoList{
 
-		wg.Submit(func() {
-			issuesMap := getIssues(repoName)
+		work := &repoData{name: repoName}
+		dispatcher.JobQueue <- work
 
-			pushIssues(repoName, issuesMap)
-		})
 	}
 
-	wg.StopWait()	// waits for all workers to finish
-
 }
+
