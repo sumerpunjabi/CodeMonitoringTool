@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/carwale/golibraries/gologger"
 	"github.com/carwale/golibraries/workerpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -15,10 +15,11 @@ import (
 
 type repoData struct {
 	name string
+	logger *gologger.CustomLogger
 }
 
 // getRepos returns an array of repository names on codacy
-func getRepos() []string{
+func getRepos(logger *gologger.CustomLogger) []string{
 
 	// struct to receive and breakdown repository list json data
 	type repoResults struct {
@@ -31,7 +32,8 @@ func getRepos() []string{
 
 	req, err := http.NewRequest("GET", "https://app.codacy.com/api/v3/analysis/organizations/gh/carwale/repositories", nil)
 	if err != nil{
-		log.Fatalln(err)
+		logger.LogError("unable to get list of repos", err)
+		return nil
 	}
 	req.Header = map[string][]string{
 		"Accept": {"application/json"},
@@ -41,19 +43,22 @@ func getRepos() []string{
 	client := &http.Client{Timeout: 10 * time.Second} // http client times out to prevent getting stuck while making request
 	resp, err := client.Do(req)
 	if err != nil{
-		log.Fatalln(err)
+		logger.LogError("timed out while getting list of repos", err)
+		return nil
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil{
-		log.Fatalln(err)
+		logger.LogError("unable to unmarshal body response while getting repos", err)
+		return nil
 	}
 
 	res := &repoResults{}
 	err = json.Unmarshal(body, res)	// translates json response body into struct
 	if err != nil{
-		log.Fatalln(err)
+		logger.LogError("unable to unmarshal json issues response while getting repos", err)
+		return nil
 	}
 
 	var repoList []string
@@ -67,7 +72,7 @@ func getRepos() []string{
 }
 
 // getIssues returns a map with issues of the respective repo
-func getIssues(repoName string) map[string]int {
+func getIssues(repoName string, logger *gologger.CustomLogger) map[string]int {
 
 	// struct to receive and breakdown repository issue json data
 	type Results struct {
@@ -81,7 +86,8 @@ func getIssues(repoName string) map[string]int {
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://app.codacy.com/api/v3/analysis/organizations/gh/carwale/repositories/%s/category-overviews", repoName), nil)
 	if err != nil{
-		log.Fatalln(err)
+		logger.LogError(fmt.Sprintf("failed to get issues for repo %s", repoName), err)
+		return nil
 	}
 	req.Header = map[string][]string{
 		"Accept": {"application/json"},
@@ -91,19 +97,22 @@ func getIssues(repoName string) map[string]int {
 	client := &http.Client{Timeout: 10 * time.Second}	// http client times out to prevent getting stuck while making request
 	resp, err := client.Do(req)
 	if err != nil{
-		log.Println(err)
+		logger.LogError(fmt.Sprintf("timed out while getting issues for repo %s", repoName), err)
+		return nil
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil{
-		log.Println(err)
+		logger.LogError(fmt.Sprintf("unable to unmarshal body response for repo %s", repoName), err)
+		return nil
 	}
 
 	res := &Results{}
 	err = json.Unmarshal(body, res)	// translates json response body into struct
 	if err != nil{
-		log.Println(err)
+		logger.LogError(fmt.Sprintf("unable to unmarshal json issues response for repo %s", repoName), err)
+		return nil
 	}
 
 	issuesMap := make(map[string]int)
@@ -143,25 +152,30 @@ func pushIssues(repoName string, issuesMap map[string]int) {
 
 // Process implements IJob by combining getIssues and pushIssues
 func (r *repoData) Process() error{
-	issuesMap := getIssues(r.name)
+	issuesMap := getIssues(r.name, r.logger)
 
-	pushIssues(r.name, issuesMap)
+	if issuesMap != nil{
+		pushIssues(r.name, issuesMap)
+	}
 
-	return errors.New("failed to update issues")
+	return nil
 }
 
 func main() {
 
-	repoList := getRepos()
-
 	dispatcher := workerpool.NewDispatcher("CodacyTool")
 
-	for _ , repoName := range repoList{
+	logger := gologger.NewLogger(gologger.DisableGraylog(true), gologger.ConsolePrintEnabled(true))
 
-		work := &repoData{name: repoName}
-		dispatcher.JobQueue <- work
+	repoList := getRepos(logger)
 
+	if repoList != nil {
+		for _, repoName := range repoList {
+
+			job := &repoData{name: repoName, logger: logger}
+			dispatcher.JobQueue <- job
+
+		}
 	}
-
 }
 
