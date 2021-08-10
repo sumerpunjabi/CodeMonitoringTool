@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"time"
 )
@@ -126,7 +125,7 @@ func getIssues(repoName string, logger *gologger.CustomLogger) map[string]int {
 }
 
 // pushIssues pushes issue data to prometheus pushgateway
-func pushIssues(repoName string, issuesMap map[string]int) {
+func pushIssues(repoName string, issuesMap map[string]int, logger *gologger.CustomLogger) {
 
 	// creates a gauge to store issue metrics
 	codacyIssuesMetric := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -143,7 +142,7 @@ func pushIssues(repoName string, issuesMap map[string]int) {
 			Grouping("Categories", i).
 			Grouping("Repository", repoName).
 			Push(); err != nil {
-			log.Printf("Could not push %s, %s to Pushgateway:", i, repoName)
+			logger.LogError(fmt.Sprintf("Could not push %s, %s to Pushgateway:", i, repoName), err)
 		}
 
 	}
@@ -155,7 +154,7 @@ func (r *repoData) Process() error{
 	issuesMap := getIssues(r.name, r.logger)
 
 	if issuesMap != nil{
-		pushIssues(r.name, issuesMap)
+		pushIssues(r.name, issuesMap, r.logger)
 	}
 
 	return nil
