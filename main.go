@@ -3,13 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"time"
+
 	"github.com/carwale/golibraries/gologger"
 	"github.com/carwale/golibraries/workerpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
-	"io/ioutil"
-	"net/http"
-	"time"
 )
 
 type repoData struct {
@@ -186,12 +187,22 @@ func main() {
 
 			}
 		}()
-
+		counter:=0
+		timer := time.After(10*time.Minute)
 		for {
-			if len(completionChan) == cap(completionChan){
-				logger.LogErrorWithoutError("Completed All Repos")
-				return
+			select {
+
+				case <- completionChan:
+					counter++
+					if counter == cap(completionChan) {
+						logger.LogErrorWithoutError("Completed All Repos")
+						return
+					}
+				case <- timer:
+					logger.LogErrorWithoutError("")
+
 			}
+
 		}
 
 	}
